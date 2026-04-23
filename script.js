@@ -81,6 +81,25 @@ function prepareTrainingData() {
 function createModel() {
     model = tf.sequential();
 
+    // Erfordert Anpassung der Datenvorbereitung (X als Indizes statt One-Hot)
+    model.add(tf.layers.embedding({
+        inputDim: vocab.length,
+        outputDim: 64, // Dichte Repräsentation
+        inputShape: [sequenceLength]
+    }));
+
+    model.add(tf.layers.lstm({
+        units: 100,
+        returnSequences: true
+    }));
+
+    model.add(tf.layers.lstm({ units: 100 }));
+
+    model.add(tf.layers.dense({
+        units: vocab.length,
+        activation: 'softmax'
+    }));
+
     model.add(tf.layers.lstm({
         units: 100,
         returnSequences: true,
@@ -107,18 +126,19 @@ function createModel() {
 // TRAINING
 // ------------------------------------------------------------
 async function trainModel(X, y) {
+    const container = { name: 'Trainingsverlauf', tab: 'Training' };
+    const callbacks = tfvis.show.fitCallbacks(container, ['loss', 'acc'], { 
+        height: 200, 
+        callbacks: ['onEpochEnd'] 
+    });
+
     await model.fit(X, y, {
         epochs: 50,
         batchSize: 32,
         shuffle: true,
-        callbacks: {
-            onEpochEnd: (epoch, logs) => {
-                console.log(`Epoch ${epoch + 1}: Loss=${logs.loss.toFixed(4)}`);
-            }
-        }
+        callbacks: callbacks // Hier die tfjs-vis Callbacks nutzen
     });
 }
-
 // ------------------------------------------------------------
 // VORHERSAGE
 // ------------------------------------------------------------
