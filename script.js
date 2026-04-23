@@ -136,8 +136,12 @@ function predictNextWord(inputText, topK = 5) {
         return oneHot;
     })]);
 
+   // const prediction = model.predict(input);
+    const probs = tf.tidy(() => {
     const prediction = model.predict(input);
-    const probs = prediction.dataSync();
+    return prediction.dataSync(); 
+});
+ //   const probs = prediction.dataSync();
 
     const topIndices = Array.from(probs.keys())
         .sort((a, b) => probs[b] - probs[a])
