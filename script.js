@@ -81,29 +81,30 @@ function prepareTrainingData() {
 function createModel() {
     model = tf.sequential();
 
-    // Erste LSTM Schicht (muss inputShape haben, wenn kein Embedding davor ist)
+    // 1. Hidden Layer: LSTM (nimmt One-Hot Input direkt an)
     model.add(tf.layers.lstm({
         units: 100,
-        returnSequences: true,
-        inputShape: [sequenceLength, vocab.length] // Hier direkt One-Hot Input
+        returnSequences: true, // Notwendig für das "Stacking"
+        inputShape: [sequenceLength, vocab.length]
     }));
 
-    // Zweite LSTM Schicht
-    model.add(tf.layers.lstm({ units: 100 }));
+    // 2. Hidden Layer: LSTM
+    model.add(tf.layers.lstm({ 
+        units: 100 
+    }));
 
-    // Output Schicht
+    // Output Layer: Softmax über das gesamte Vokabular
     model.add(tf.layers.dense({
         units: vocab.length,
         activation: 'softmax'
     }));
 
     model.compile({
-        optimizer: tf.train.adam(0.001),
+        optimizer: tf.train.adam(0.001), // Empfohlene Lernrate für Stabilität
         loss: 'categoricalCrossentropy'
     });
 
-
-    console.log("Modell erstellt:");
+    console.log("Modell erfolgreich erstellt:");
     model.summary();
 }
 
