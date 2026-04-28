@@ -28,7 +28,7 @@ function setButtonsEnabled(enabled) {
 // DATEN LADEN
 // ------------------------------------------------------------
 async function loadData() {
-    const response = await fetch('data/text_corpus.txt');
+    const response = await fetch('data/1.text_corpus.txt');
     const text = await response.text();
 
     const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
