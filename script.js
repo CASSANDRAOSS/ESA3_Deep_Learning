@@ -4,34 +4,27 @@ let idx2word = {};
 let sequences = [];
 let nextWords = [];
 const sequenceLength = 5;
-
 let model;
 let modelReady = false;
 
-// Buttons & UI-Elemente
+// UI Elemente
 const predictBtn = document.getElementById("predictBtn");
 const nextBtn = document.getElementById("nextBtn");
 const autoBtn = document.getElementById("autoBtn");
 const stopBtn = document.getElementById("stopBtn");
 const resetBtn = document.getElementById("resetBtn");
-
 const statusDiv = document.getElementById("status");
 const resultsDiv = document.getElementById("results");
 
 function setButtonsEnabled(enabled) {
-    [predictBtn, nextBtn, autoBtn, stopBtn, resetBtn].forEach(btn => {
-        btn.disabled = !enabled;
-    });
+    [predictBtn, nextBtn, autoBtn, stopBtn, resetBtn].forEach(btn => btn.disabled = !enabled);
 }
 
-// ------------------------------------------------------------
-// DATEN LADEN
-// ------------------------------------------------------------
+// 1. DATEN LADEN
 async function loadData() {
     const response = await fetch('data/text_corpus.txt');
     const text = await response.text();
-
-    const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
+    const words = text.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 0);
 
     vocab = Array.from(new Set(words));
     vocab.forEach((word, idx) => {
@@ -44,284 +37,157 @@ async function loadData() {
         sequences.push(seq.map(w => word2idx[w]));
         nextWords.push(word2idx[words[i + sequenceLength]]);
     }
-
-    console.log(`Vokabulargröße: ${vocab.length}`);
-    console.log(`Anzahl der Sequenzen: ${sequences.length}`);
 }
 
-// ------------------------------------------------------------
-// TRAININGSDATEN VORBEREITEN
-// ------------------------------------------------------------
+// 2. TENSOREN ERSTELLEN
 function prepareTrainingData() {
-    const X = [];
-    const y = [];
-
-    sequences.forEach((seq, i) => {
-        const xSeq = seq.map(idx => {
+    const X = sequences.map(seq => 
+        seq.map(idx => {
             const oneHot = new Array(vocab.length).fill(0);
             oneHot[idx] = 1;
             return oneHot;
-        });
-        X.push(xSeq);
-
-        const yVec = new Array(vocab.length).fill(0);
-        yVec[nextWords[i]] = 1;
-        y.push(yVec);
+        })
+    );
+    const y = nextWords.map(idx => {
+        const vec = new Array(vocab.length).fill(0);
+        vec[idx] = 1;
+        return vec;
     });
 
-    return {
-        X_tensor: tf.tensor3d(X),
-        y_tensor: tf.tensor2d(y)
-    };
+    return { X_tensor: tf.tensor3d(X), y_tensor: tf.tensor2d(y) };
 }
 
-// ------------------------------------------------------------
-// MODELL ERSTELLEN
-// ------------------------------------------------------------
+// 3. MODELL (Stacked LSTM)
 function createModel() {
     model = tf.sequential();
-
-    // 1. Hidden Layer: LSTM (nimmt One-Hot Input direkt an)
     model.add(tf.layers.lstm({
         units: 100,
-        returnSequences: true, // Notwendig für das "Stacking"
+        returnSequences: true,
         inputShape: [sequenceLength, vocab.length]
     }));
-
-    // 2. Hidden Layer: LSTM
-    model.add(tf.layers.lstm({ 
-        units: 100 
-    }));
-
-    // Output Layer: Softmax über das gesamte Vokabular
-    model.add(tf.layers.dense({
-        units: vocab.length,
-        activation: 'softmax'
-    }));
+    model.add(tf.layers.lstm({ units: 100 }));
+    model.add(tf.layers.dense({ units: vocab.length, activation: 'softmax' }));
 
     model.compile({
-        optimizer: tf.train.adam(0.001), // Empfohlene Lernrate für Stabilität
-        loss: 'categoricalCrossentropy'
+        optimizer: tf.train.adam(0.001),
+        loss: 'categoricalCrossentropy',
+        metrics: ['accuracy']
     });
-
-    console.log("Modell erfolgreich erstellt:");
-    model.summary();
 }
 
-// ------------------------------------------------------------
-// TRAINING
-// ------------------------------------------------------------
 async function trainModel(X, y) {
-    const container = { name: 'Trainingsverlauf', tab: 'Training' };
-    const callbacks = tfvis.show.fitCallbacks(container, ['loss', 'acc'], { 
-        height: 200, 
-        callbacks: ['onEpochEnd'] 
-    });
-
-    await model.fit(X, y, {
-        epochs: 50,
-        batchSize: 32,
-        shuffle: true,
-        callbacks: callbacks // Hier die tfjs-vis Callbacks nutzen
-    });
+    const callbacks = tfvis.show.fitCallbacks({ name: 'Training', tab: 'Status' }, ['loss', 'acc']);
+    await model.fit(X, y, { epochs: 50, batchSize: 32, shuffle: true, callbacks });
 }
-// ------------------------------------------------------------
-// VORHERSAGE
-// ------------------------------------------------------------
+
+// 4. VORHERSAGE
 function predictNextWord(inputText, topK = 5) {
     if (!modelReady) return [];
-
-    const words = inputText.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/);
+    const words = inputText.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 0);
     if (words.length < sequenceLength) return [];
 
-    const seq = words.slice(-sequenceLength).map(w => word2idx[w] || 0);
+    const lastWords = words.slice(-sequenceLength);
+    const inputSeq = lastWords.map(w => word2idx[w] ?? Math.floor(Math.random() * vocab.length));
 
-    const input = tf.tensor3d([seq.map(idx => {
-        const oneHot = new Array(vocab.length).fill(0);
-        oneHot[idx] = 1;
-        return oneHot;
-    })]);
-
-   // const prediction = model.predict(input);
-    const probs = tf.tidy(() => {
-    const prediction = model.predict(input);
-    return prediction.dataSync(); 
-});
- //   const probs = prediction.dataSync();
-
-    const topIndices = Array.from(probs.keys())
-        .sort((a, b) => probs[b] - probs[a])
-        .slice(0, topK);
-
-    return topIndices.map(idx => ({
-        word: idx2word[idx],
-        probability: probs[idx]
-    }));
-}
-
-// ------------------------------------------------------------
-// UI: VORHERSAGEN ANZEIGEN
-// ------------------------------------------------------------
-function displayPredictions(predictions) {
-    const predDiv = document.getElementById("predictions");
-    predDiv.innerHTML = '';
-
-    predictions.forEach(p => {
-        const btn = document.createElement('button');
-        btn.textContent = `${p.word} (${(p.probability * 100).toFixed(1)}%)`;
-        btn.onclick = () => {
-            const textArea = document.getElementById("inputText");
-            textArea.value += ' ' + p.word;
-
-            const newPredictions = predictNextWord(textArea.value);
-            displayPredictions(newPredictions);
-        };
-        predDiv.appendChild(btn);
-    });
-}
-
-// ------------------------------------------------------------
-// BUTTON EVENTS
-// ------------------------------------------------------------
-predictBtn.onclick = () => {
-    const text = document.getElementById("inputText").value;
-    const predictions = predictNextWord(text);
-    displayPredictions(predictions);
-};
-
-nextBtn.onclick = () => {
-    const textArea = document.getElementById("inputText");
-    let text = textArea.value;
-
-    const predictions = predictNextWord(text, 1);
-    if (predictions.length === 0) return;
-
-    const nextWord = predictions[0].word;
-    textArea.value = text + ' ' + nextWord;
-
-    const topPredictions = predictNextWord(textArea.value);
-    displayPredictions(topPredictions);
-};
-
-resetBtn.onclick = () => {
-    document.getElementById("inputText").value = '';
-    document.getElementById("predictions").innerHTML = '';
-};
-
-let autoInterval;
-autoBtn.onclick = () => {
-    let count = 0;
-    const maxWords = 10;
-
-    autoInterval = setInterval(() => {
-        if (count >= maxWords) {
-            clearInterval(autoInterval);
-            return;
-        }
-
-        const textArea = document.getElementById("inputText");
-        const predictions = predictNextWord(textArea.value, 1);
-        if (predictions.length === 0) return;
-
-        textArea.value += ' ' + predictions[0].word;
-
-        const topPredictions = predictNextWord(textArea.value);
-        displayPredictions(topPredictions);
-
-        count++;
-    }, 500);
-};
-
-stopBtn.onclick = () => {
-    clearInterval(autoInterval);
-};
-
-// ------------------------------------------------------------
-// EVALUATION
-// ------------------------------------------------------------
-function computeTopKAccuracy(X, y, kValues = [1, 5, 10, 20, 100]) {
-    const topKCounts = kValues.map(_ => 0);
-    const total = X.shape[0];
-
-    for (let i = 0; i < total; i++) {
-        const input = X.slice([i, 0, 0], [1, X.shape[1], X.shape[2]]);
-        const trueIdx = y.slice([i, 0], [1, y.shape[1]]).argMax(-1).dataSync()[0];
-
-        const preds = model.predict(input).dataSync();
-        const topIndices = Array.from(preds.keys())
-            .sort((a, b) => preds[b] - preds[a]);
-
-        kValues.forEach((k, idx) => {
-            if (topIndices.slice(0, k).includes(trueIdx)) topKCounts[idx]++;
+    return tf.tidy(() => {
+        const inputIdx = inputSeq.map(idx => {
+            const oh = new Array(vocab.length).fill(0);
+            oh[idx] = 1;
+            return oh;
         });
-    }
-
-    const accuracies = topKCounts.map(count => count / total);
-    resultsDiv.innerHTML = "";
-
-    kValues.forEach((k, idx) => {
-        const line = document.createElement('div');
-        line.textContent = `Top-${k} Accuracy: ${(accuracies[idx] * 100).toFixed(2)}%`;
-        resultsDiv.appendChild(line);
+        const inputTensor = tf.tensor3d([inputIdx]);
+        const probs = model.predict(inputTensor).dataSync();
+        
+        return Array.from(probs.keys())
+            .sort((a, b) => probs[b] - probs[a])
+            .slice(0, topK)
+            .map(idx => ({ word: idx2word[idx], probability: probs[idx] }));
     });
 }
 
-function computePerplexity(X, y) {
+// 5. EVALUATION (Async zur Performance)
+async function evaluateModel(X, y) {
     const total = X.shape[0];
+    let top1 = 0, top5 = 0;
     let lossSum = 0;
 
     for (let i = 0; i < total; i++) {
-        const input = X.slice([i, 0, 0], [1, X.shape[1], X.shape[2]]);
-        const trueIdx = y.slice([i, 0], [1, y.shape[1]]).argMax(-1).dataSync()[0];
+        if (i % 20 === 0) await tf.nextFrame(); // Browser-Pause
 
-        const preds = model.predict(input).dataSync();
-        const prob = preds[trueIdx];
-        lossSum += -Math.log(prob + 1e-7);
+        const input = X.slice([i, 0, 0], [1, sequenceLength, vocab.length]);
+        const trueIdx = y.slice([i, 0], [1, vocab.length]).argMax(-1).dataSync()[0];
+        
+        const probs = model.predict(input).dataSync();
+        const sorted = Array.from(probs.keys()).sort((a, b) => probs[b] - probs[a]);
+
+        if (sorted[0] === trueIdx) top1++;
+        if (sorted.slice(0, 5).includes(trueIdx)) top5++;
+        lossSum += -Math.log(probs[trueIdx] + 1e-7);
     }
 
-    const perplexity = Math.exp(lossSum / total);
-    const line = document.createElement('div');
-    line.textContent = `Perplexity: ${perplexity.toFixed(3)}`;
-    resultsDiv.appendChild(line);
+    resultsDiv.innerHTML = `
+        <p>Top-1 Accuracy: ${(top1/total*100).toFixed(2)}%</p>
+        <p>Top-5 Accuracy: ${(top5/total*100).toFixed(2)}%</p>
+        <p>Perplexity: ${Math.exp(lossSum/total).toFixed(2)}</p>
+    `;
 }
 
-// ------------------------------------------------------------
-// TRAINING PIPELINE
-// ------------------------------------------------------------
+// PIPELINE START
 async function runTraining() {
     setButtonsEnabled(false);
-    statusDiv.textContent = "Daten werden geladen...";
-
+    statusDiv.textContent = "Lade Korpus...";
     await loadData();
-
-    statusDiv.textContent = "Trainingsdaten werden vorbereitet...";
+    
+    statusDiv.textContent = "Bereite Tensoren vor...";
     const { X_tensor, y_tensor } = prepareTrainingData();
-
-    statusDiv.textContent = "Modell wird erstellt...";
+    
     createModel();
-
-    statusDiv.textContent = "Modell wird trainiert...";
+    statusDiv.textContent = "Training läuft (siehe Visor)...";
     await trainModel(X_tensor, y_tensor);
-
-    statusDiv.textContent = "Modell wird ausgewertet...";
-    computeTopKAccuracy(X_tensor, y_tensor);
-    computePerplexity(X_tensor, y_tensor);
-
-    statusDiv.textContent = "Modell bereit. Gib einen Text ein.";
+    
+    if (window.innerWidth < 600) tfvis.visor().close();
+    
+    statusDiv.textContent = "Auswertung...";
+    await evaluateModel(X_tensor, y_tensor);
+    
+    statusDiv.textContent = "Bereit!";
     modelReady = true;
     setButtonsEnabled(true);
 }
 
-// Dropdown-Logik
-document.querySelectorAll(".dropdown-toggle").forEach(btn => {
-    btn.addEventListener("click", () => {
-        const parent = btn.parentElement;
-        parent.classList.toggle("open");
+// UI LOGIK
+predictBtn.onclick = () => displayPredictions(predictNextWord(document.getElementById("inputText").value));
+
+function displayPredictions(preds) {
+    const div = document.getElementById("predictions");
+    div.innerHTML = "";
+    preds.forEach(p => {
+        const b = document.createElement("button");
+        b.textContent = `${p.word} (${(p.probability*100).toFixed(1)}%)`;
+        b.onclick = () => {
+            document.getElementById("inputText").value += " " + p.word;
+            displayPredictions(predictNextWord(document.getElementById("inputText").value));
+        };
+        div.appendChild(b);
     });
+}
+
+nextBtn.onclick = () => {
+    const area = document.getElementById("inputText");
+    const p = predictNextWord(area.value, 1);
+    if (p.length > 0) {
+        area.value += " " + p[0].word;
+        displayPredictions(predictNextWord(area.value));
+    }
+};
+
+resetBtn.onclick = () => {
+    document.getElementById("inputText").value = "";
+    document.getElementById("predictions").innerHTML = "";
+};
+
+document.querySelectorAll(".dropdown-toggle").forEach(b => {
+    b.onclick = () => b.parentElement.classList.toggle("open");
 });
 
-
-// ------------------------------------------------------------
-// START
-// ------------------------------------------------------------
 runTraining();
