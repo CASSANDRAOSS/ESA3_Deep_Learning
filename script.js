@@ -309,12 +309,22 @@ async function runTraining() {
     setButtonsEnabled(true);
 }
 
-// Dropdown-Logik
+// Dropdown-Logik: Schließt andere, wenn eines geöffnet wird
 document.querySelectorAll(".dropdown-toggle").forEach(btn => {
-    btn.addEventListener("click", () => {
-        const parent = btn.parentElement;
-        parent.classList.toggle("open");
-    });
+    btn.addEventListener("click", () => {
+        const parent = btn.parentElement;
+        const isOpen = parent.classList.contains("open");
+
+        // 1. Zuerst ALLE Dropdowns schließen
+        document.querySelectorAll(".dropdown").forEach(dropdown => {
+            dropdown.classList.remove("open");
+        });
+
+        // 2. Nur wenn das angeklickte vorher ZU war, öffnen wir es jetzt
+        if (!isOpen) {
+            parent.classList.add("open");
+        }
+    });
 });
 
 
