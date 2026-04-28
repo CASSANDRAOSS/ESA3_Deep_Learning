@@ -81,33 +81,17 @@ function prepareTrainingData() {
 function createModel() {
     model = tf.sequential();
 
-    // Erfordert Anpassung der Datenvorbereitung (X als Indizes statt One-Hot)
-    model.add(tf.layers.embedding({
-        inputDim: vocab.length,
-        outputDim: 64, // Dichte Repräsentation
-        inputShape: [sequenceLength]
-    }));
-
-    model.add(tf.layers.lstm({
-        units: 100,
-        returnSequences: true
-    }));
-
-    model.add(tf.layers.lstm({ units: 100 }));
-
-    model.add(tf.layers.dense({
-        units: vocab.length,
-        activation: 'softmax'
-    }));
-
+    // Erste LSTM Schicht (muss inputShape haben, wenn kein Embedding davor ist)
     model.add(tf.layers.lstm({
         units: 100,
         returnSequences: true,
-        inputShape: [sequenceLength, vocab.length]
+        inputShape: [sequenceLength, vocab.length] // Hier direkt One-Hot Input
     }));
 
+    // Zweite LSTM Schicht
     model.add(tf.layers.lstm({ units: 100 }));
 
+    // Output Schicht
     model.add(tf.layers.dense({
         units: vocab.length,
         activation: 'softmax'
@@ -117,6 +101,7 @@ function createModel() {
         optimizer: tf.train.adam(0.001),
         loss: 'categoricalCrossentropy'
     });
+
 
     console.log("Modell erstellt:");
     model.summary();
